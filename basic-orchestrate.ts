@@ -136,7 +136,7 @@ async function callAgent(
       throw new Error(`Agent call failed: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data: any = await response.json();
     const executionTime = Date.now() - startTime;
 
     return {
@@ -168,15 +168,15 @@ function aggregateResults(results: AgentCallResult[]): OrchestrationResponse {
   const failed = results.filter(r => r.error);
 
   // Build summary from successful results
-  const summaryParts = successful.map(r => {
+  const summaryParts = successful.map((r: AgentCallResult) => {
     const agentName = r.agent_id.split('_')[0]; // aixbt, WachXBT, etc.
     const costStr = `$${r.cost.toFixed(3)}`;
 
-    if (r.result?.sentiment !== undefined) {
-      return `${agentName}: sentiment ${(r.result.sentiment * 100).toFixed(0)}% (${costStr})`;
-    } else if (r.result?.safe !== undefined) {
-      return `${agentName}: ${r.result.safe ? 'safe' : 'risky'} (${costStr})`;
-    } else if (r.result?.flow !== undefined) {
+    if (r.result && typeof r.result === 'object' && 'sentiment' in r.result) {
+      return `${agentName}: sentiment ${((r.result.sentiment as number) * 100).toFixed(0)}% (${costStr})`;
+    } else if (r.result && typeof r.result === 'object' && 'safe' in r.result) {
+      return `${agentName}: ${(r.result.safe ? 'safe' : 'risky')} (${costStr})`;
+    } else if (r.result && typeof r.result === 'object' && 'flow' in r.result) {
       return `${agentName}: ${r.result.flow} (${costStr})`;
     } else {
       return `${agentName}: completed (${costStr})`;
