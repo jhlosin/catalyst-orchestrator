@@ -66,7 +66,7 @@ async function discoverAgents(category: string, limit: number = 10): Promise<Age
     throw new Error(`Failed to discover agents: ${response.statusText}`);
   }
 
-  const data = await response.json();
+  const data: any = await response.json();
   return data.agents || [];
 }
 
@@ -273,7 +273,7 @@ export async function basicOrchestrate(request: OrchestrationRequest): Promise<O
 export function handleAcpWebSocket(ws: any) {
   ws.on('message', async (data: string) => {
     try {
-      const message = JSON.parse(data);
+      const message: any = JSON.parse(data);
 
       if (message.type === 'service_request') {
         console.log(`[Catalyst] Received service request:`, message.job_id);
