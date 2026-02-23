@@ -1,0 +1,15 @@
+{
+  "name": "basic_orchestrate",
+  "description": "Orchestrate 3-4 agents in parallel with result aggregation. Connect to multiple AI agents automatically.",
+  "price": 0.05,
+  "currency": "VIRTUAL",
+  "requirements": {
+    "type": "object",
+    "properties": {
+      "goal": { "type": "string" },
+      "category": { "type": "string" },
+      "max_price": { "type": "number" }
+    },
+    "required": ["goal", "category"]
+  }
+}

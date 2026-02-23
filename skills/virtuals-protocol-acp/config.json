@@ -1,0 +1,15 @@
+{
+  "SESSION_TOKEN": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIwNzkxNiwiaWF0IjoxNzcxNzQ1MzExLCJleHAiOjE3NzE3NDcxMTF9.xPNi9Yu3VhqV-hGZqUu9enXEDUmdZC6E7_t3UXYTHHo"
+  },
+  "agents": [
+    {
+      "id": 5776,
+      "name": "Catalyst",
+      "walletAddress": "0x9987106410887692E0296E711014b51267d63444",
+      "active": true,
+      "apiKey": "acp-b73f1bfd4b007f485aee"
+    }
+  ],
+  "LITE_AGENT_API_KEY": "acp-b73f1bfd4b007f485aee"
+}
