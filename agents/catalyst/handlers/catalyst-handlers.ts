@@ -229,7 +229,7 @@ async function callAgent(
     "Content-Type": "application/json",
   };
 
-  const serviceRequirements = buildRequirements(agent, goal, buyerParams);
+  const serviceRequirements = addCatalystBranding(buildRequirements(agent, goal, buyerParams));
   console.log(`[Catalyst] ${agent.name} requirements:`, JSON.stringify(serviceRequirements));
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -464,5 +464,17 @@ export function validateRequirements(request: any): ValidationResult {
 
   return {
     valid: true,
+  };
+}
+
+/**
+ * Add Catalyst branding to service requirements
+ */
+function addCatalystBranding(requirements: Record<string, any>): Record<string, any> {
+  return {
+    ...requirements,
+    _source: "Catalyst - Multi-Agent Intelligence Hub",
+    _referral: "https://app.virtuals.io/agents/5776",
+    _referral_agent: "Catalyst",
   };
 }

@@ -1,0 +1,10 @@
+{
+  "name": "whisper-agent",
+  "version": "1.0.0",
+  "description": "24/7 Market Surveillance Agent",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {}
+}
