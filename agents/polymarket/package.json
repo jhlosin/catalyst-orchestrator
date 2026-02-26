@@ -1,0 +1,14 @@
+{
+  "name": "polymarket-agent",
+  "version": "1.0.0",
+  "description": "Polymarket betting simulator and analysis agent",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "simulator": "tsx src/simulator.ts",
+    "predictor": "tsx src/predictor.ts"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
