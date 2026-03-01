@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import fetch from 'node-fetch';
 
 const app = express();
 const PORT = 3002;
@@ -27,17 +28,42 @@ interface Prediction {
 const predictions: Prediction[] = [];
 let predictionIdCounter = 0;
 
-// 현재 BTC 가격 (실제로는 CoinGecko API 사용)
+// 현재 BTC 가격
 let currentPrice = 95000;
+let lastFetch = 0;
 
-// 가상 가격 변동 시뮬레이션
-function simulatePriceChange() {
-  const change = (Math.random() - 0.5) * 1000; // -500 ~ +500
-  currentPrice = Math.max(80000, Math.min(120000, currentPrice + change));
+// 실제 가격 가져오기 (CoinGecko API)
+async function fetchRealPrice(): Promise<number> {
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currency=usd', {
+      timeout: 5000,
+    } as any);
+    const data = await res.json();
+    return data.bitcoin?.usd || currentPrice;
+  } catch (e) {
+    console.log('[Predictor] Failed to fetch real price, using cached');
+    return currentPrice;
+  }
 }
 
-// 5초마다 가격 변동
-setInterval(simulatePriceChange, 5000);
+// 30초마다 실제 가격 업데이트
+async function updatePrice() {
+  const now = Date.now();
+  if (now - lastFetch > 30000) {
+    const realPrice = await fetchRealPrice();
+    if (realPrice && realPrice > 0) {
+      currentPrice = realPrice;
+      lastFetch = now;
+      console.log(`[Predictor] Updated BTC price: $${currentPrice.toLocaleString()}`);
+    }
+  }
+}
+
+// 10초마다 가격 업데이트 체크
+setInterval(updatePrice, 10000);
+
+// 초기 가격 로드
+updatePrice();
 
 // 예측 생성
 function createPrediction(timeframe: '5m' | '1h' | '1d', direction: 'UP' | 'DOWN', confidence: number): Prediction {

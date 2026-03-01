@@ -1,0 +1,483 @@
+/**
+ * Crypto Paper Trading Simulator
+ * 실제 BTC/ETH 가격 + Polymarket 스타일 예측 시장
+ */
+
+import express from 'express';
+import fetch from 'node-fetch';
+
+const app = express();
+const PORT = 3001;
+
+app.use(express.json());
+
+// 가상 자금
+let virtualBalance = 1000; // $1000 시작
+
+// 베팅 기록
+interface Bet {
+  id: number;
+  marketId: string;
+  question: string;
+  outcome: 'YES' | 'NO';
+  odds: number;
+  amount: number;
+  status: 'pending' | 'won' | 'lost';
+  potentialReturn: number;
+  priceAtBet?: number;
+  targetPrice?: number;
+  currentPrice?: number;
+  createdAt: Date;
+  settledAt?: Date;
+}
+
+const bets: Bet[] = [];
+let betIdCounter = 0;
+
+// 실제 가격
+let btcPrice = 67000;
+let ethPrice = 3500;
+let lastFetch = 0;
+
+// 활성 시장 (Polymarket 스타일)
+const markets = [
+  {
+    id: 'btc-100k-2025',
+    question: 'Will BTC reach $100,000 by end of 2025?',
+    category: 'bitcoin',
+    yesOdds: 0.65,
+    noOdds: 0.35,
+    targetPrice: 100000,
+    condition: 'above',
+    deadline: new Date('2025-12-31'),
+  },
+  {
+    id: 'btc-75k-march',
+    question: 'Will BTC be above $75,000 on March 31?',
+    category: 'bitcoin',
+    yesOdds: 0.45,
+    noOdds: 0.55,
+    targetPrice: 75000,
+    condition: 'above',
+    deadline: new Date('2025-03-31'),
+  },
+  {
+    id: 'btc-70k-today',
+    question: 'Will BTC be above $70,000 in 1 hour?',
+    category: 'bitcoin',
+    yesOdds: 0.50,
+    noOdds: 0.50,
+    targetPrice: 70000,
+    condition: 'above',
+    deadline: new Date(Date.now() + 60 * 60 * 1000),
+  },
+  {
+    id: 'eth-4k-2025',
+    question: 'Will ETH reach $4,000 by end of 2025?',
+    category: 'ethereum',
+    yesOdds: 0.55,
+    noOdds: 0.45,
+    targetPrice: 4000,
+    condition: 'above',
+    deadline: new Date('2025-12-31'),
+  },
+  {
+    id: 'eth-3.5k-today',
+    question: 'Will ETH be above $3,500 in 1 hour?',
+    category: 'ethereum',
+    yesOdds: 0.50,
+    noOdds: 0.50,
+    targetPrice: 3500,
+    condition: 'above',
+    deadline: new Date(Date.now() + 60 * 60 * 1000),
+  },
+];
+
+// 실제 가격 가져오기
+async function fetchPrices(): Promise<void> {
+  try {
+    const [btcRes, ethRes] = await Promise.all([
+      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd'),
+      fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd'),
+    ]);
+    
+    const btcData = await btcRes.json();
+    const ethData = await ethRes.json();
+    
+    if (btcData.bitcoin?.usd) btcPrice = btcData.bitcoin.usd;
+    if (ethData.ethereum?.usd) ethPrice = ethData.ethereum.usd;
+    
+    lastFetch = Date.now();
+    console.log(`[PaperTrading] BTC: $${btcPrice.toLocaleString()} | ETH: $${ethPrice.toLocaleString()}`);
+  } catch (e) {
+    console.log('[PaperTrading] Price fetch failed, using cached');
+  }
+}
+
+// 30초마다 가격 업데이트
+setInterval(fetchPrices, 30000);
+fetchPrices(); // 초기 로드
+
+// 시장 오즈 동적 업데이트 (현재 가격 기반)
+function updateMarketOdds(): void {
+  markets.forEach(m => {
+    const currentPrice = m.category === 'bitcoin' ? btcPrice : ethPrice;
+    const targetPrice = m.targetPrice;
+    
+    if (m.condition === 'above') {
+      // 현재 가격이 타겟에 가까울수록 YES 확률 증가
+      const ratio = currentPrice / targetPrice;
+      const yesProb = Math.min(0.95, Math.max(0.05, ratio * 0.5));
+      m.yesOdds = Math.round(yesProb * 100) / 100;
+      m.noOdds = Math.round((1 - yesProb) * 100) / 100;
+    }
+  });
+}
+
+// 10초마다 오즈 업데이트
+setInterval(updateMarketOdds, 10000);
+
+// API: 상태
+app.get('/api/status', (req, res) => {
+  const activeBets = bets.filter(b => b.status === 'pending');
+  const wonBets = bets.filter(b => b.status === 'won');
+  const lostBets = bets.filter(b => b.status === 'lost');
+  
+  const totalWon = wonBets.reduce((sum, b) => sum + b.potentialReturn, 0);
+  const totalLost = lostBets.reduce((sum, b) => sum + b.amount, 0);
+  
+  res.json({
+    virtualBalance: virtualBalance.toFixed(2),
+    prices: {
+      btc: btcPrice,
+      eth: ethPrice,
+    },
+    totalBets: bets.length,
+    activeBets: activeBets.length,
+    wonBets: wonBets.length,
+    lostBets: lostBets.length,
+    totalWagered: bets.reduce((sum, b) => sum + b.amount, 0).toFixed(2),
+    totalWon: totalWon.toFixed(2),
+    totalLost: totalLost.toFixed(2),
+    netProfit: (totalWon - totalLost).toFixed(2),
+    winRate: (wonBets.length + lostBets.length) > 0 
+      ? Math.round((wonBets.length / (wonBets.length + lostBets.length)) * 100) 
+      : 0,
+  });
+});
+
+// API: 시장 목록
+app.get('/api/markets', (req, res) => {
+  res.json(markets.map(m => ({
+    ...m,
+    currentPrice: m.category === 'bitcoin' ? btcPrice : ethPrice,
+    priceToTarget: ((m.category === 'bitcoin' ? btcPrice : ethPrice) / m.targetPrice * 100).toFixed(1) + '%',
+  })));
+});
+
+// API: 베팅 생성
+app.post('/api/bet', (req, res) => {
+  const { marketId, outcome, amount } = req.body;
+  
+  if (amount > virtualBalance) {
+    return res.status(400).json({ error: 'Insufficient balance' });
+  }
+  
+  const market = markets.find(m => m.id === marketId);
+  if (!market) {
+    return res.status(404).json({ error: 'Market not found' });
+  }
+  
+  const odds = outcome === 'YES' ? market.yesOdds : market.noOdds;
+  const potentialReturn = amount / odds;
+  const currentPrice = market.category === 'bitcoin' ? btcPrice : ethPrice;
+  
+  virtualBalance -= amount;
+  
+  const bet: Bet = {
+    id: ++betIdCounter,
+    marketId,
+    question: market.question,
+    outcome,
+    odds,
+    amount,
+    status: 'pending',
+    potentialReturn,
+    priceAtBet: currentPrice,
+    targetPrice: market.targetPrice,
+    currentPrice,
+    createdAt: new Date(),
+  };
+  
+  bets.unshift(bet);
+  
+  res.json({
+    success: true,
+    bet,
+    newBalance: virtualBalance,
+  });
+});
+
+// API: 베팅 정산
+app.post('/api/bet/:id/settle', (req, res) => {
+  const { id } = req.params;
+  const { won } = req.body;
+  
+  const bet = bets.find(b => b.id === parseInt(id));
+  if (!bet) {
+    return res.status(404).json({ error: 'Bet not found' });
+  }
+  
+  if (bet.status !== 'pending') {
+    return res.status(400).json({ error: 'Bet already settled' });
+  }
+  
+  bet.status = won ? 'won' : 'lost';
+  bet.settledAt = new Date();
+  
+  const market = markets.find(m => m.id === bet.marketId);
+  if (market) {
+    bet.currentPrice = market.category === 'bitcoin' ? btcPrice : ethPrice;
+  }
+  
+  if (won) {
+    virtualBalance += bet.potentialReturn;
+  }
+  
+  res.json({
+    success: true,
+    bet,
+    newBalance: virtualBalance,
+  });
+});
+
+// API: 자동 정산 (현재 가격 기준)
+app.post('/api/auto-settle', (req, res) => {
+  let settled = 0;
+  
+  bets.forEach(bet => {
+    if (bet.status !== 'pending') return;
+    
+    const market = markets.find(m => m.id === bet.marketId);
+    if (!market) return;
+    
+    const currentPrice = market.category === 'bitcoin' ? btcPrice : ethPrice;
+    bet.currentPrice = currentPrice;
+    
+    // 조건 체크
+    let won = false;
+    if (market.condition === 'above') {
+      won = currentPrice >= market.targetPrice;
+    } else {
+      won = currentPrice <= market.targetPrice;
+    }
+    
+    bet.status = won ? 'won' : 'lost';
+    bet.settledAt = new Date();
+    
+    if (won) {
+      virtualBalance += bet.potentialReturn;
+    }
+    
+    settled++;
+  });
+  
+  res.json({ success: true, settled, newBalance: virtualBalance });
+});
+
+// API: 베팅 기록
+app.get('/api/bets', (req, res) => {
+  // 현재 가격 업데이트해서 반환
+  constBetsWithCurrentPrice = bets.map(b => {
+    const market = markets.find(m => m.id === b.marketId);
+    if (market && b.status === 'pending') {
+      b.currentPrice = market.category === 'bitcoin' ? btcPrice : ethPrice;
+    }
+    return b;
+  });
+  res.json(betsWithCurrentPrice);
+});
+
+// HTML Dashboard
+app.get('/', (req, res) => {
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Crypto Paper Trading</title>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #fff; padding: 20px; }
+    h1 { color: #f7931a; margin-bottom: 10px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0; }
+    .card { background: #141414; border-radius: 12px; padding: 20px; border: 1px solid #222; }
+    .price-card { text-align: center; }
+    .price { font-size: 36px; font-weight: bold; }
+    .btc { color: #f7931a; }
+    .eth { color: #627eea; }
+    .balance { font-size: 42px; color: #00ff88; }
+    .label { color: #888; font-size: 12px; margin-bottom: 5px; }
+    .market { background: #1a1a1a; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+    .market-question { margin-bottom: 10px; }
+    .odds { color: #ffd700; }
+    .btn { background: #00ff88; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; margin-right: 5px; }
+    .btn:hover { opacity: 0.8; }
+    .btn-no { background: #ff4444; }
+    input { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 8px; border-radius: 6px; width: 80px; }
+    .bet { background: #1a1a1a; padding: 10px; border-radius: 6px; margin-bottom: 8px; }
+    .won { border-left: 3px solid #00ff88; }
+    .lost { border-left: 3px solid #ff4444; }
+    .pending { border-left: 3px solid #f7931a; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .stat { text-align: center; }
+    .stat-value { font-size: 24px; font-weight: bold; }
+    .good { color: #00ff88; }
+    .bad { color: #ff4444; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎰 Crypto Paper Trading</h1>
+    <p style="color:#888;">Real BTC/ETH prices + Polymarket-style prediction markets</p>
+    
+    <div class="grid">
+      <div class="card price-card">
+        <div class="label">BITCOIN</div>
+        <div class="price btc" id="btc-price">$67,000</div>
+      </div>
+      <div class="card price-card">
+        <div class="label">ETHEREUM</div>
+        <div class="price eth" id="eth-price">$3,500</div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <div class="label">Virtual Balance</div>
+      <div class="balance" id="balance">$1,000</div>
+      <div class="stats" style="margin-top:15px;">
+        <div class="stat">
+          <div class="stat-value" id="total-bets">0</div>
+          <div class="label">Bets</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="win-rate">-</div>
+          <div class="label">Win Rate</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="net-profit">$0</div>
+          <div class="label">Net P/L</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="active">0</div>
+          <div class="label">Active</div>
+        </div>
+      </div>
+    </div>
+    
+    <h2 style="color:#888;margin:20px 0 10px;font-size:14px;">ACTIVE MARKETS</h2>
+    <div id="markets">Loading...</div>
+    
+    <h2 style="color:#888;margin:20px 0 10px;font-size:14px;">YOUR BETS</h2>
+    <button class="btn" onclick="autoSettle()" style="margin-bottom:10px;">Auto Settle</button>
+    <div id="bets">No bets yet</div>
+  </div>
+  
+  <script>
+    async function load() {
+      const [statusRes, marketsRes, betsRes] = await Promise.all([
+        fetch('/api/status'),
+        fetch('/api/markets'),
+        fetch('/api/bets')
+      ]);
+      
+      const status = await statusRes.json();
+      const markets = await marketsRes.json();
+      const bets = await betsRes.json();
+      
+      document.getElementById('btc-price').textContent = '$' + status.prices.btc.toLocaleString();
+      document.getElementById('eth-price').textContent = '$' + status.prices.eth.toLocaleString();
+      document.getElementById('balance').textContent = '$' + parseFloat(status.virtualBalance).toFixed(2);
+      document.getElementById('total-bets').textContent = status.totalBets;
+      document.getElementById('win-rate').textContent = status.winRate + '%';
+      document.getElementById('active').textContent = status.activeBets;
+      
+      const profitEl = document.getElementById('net-profit');
+      profitEl.textContent = '$' + status.netProfit;
+      profitEl.className = 'stat-value ' + (parseFloat(status.netProfit) >= 0 ? 'good' : 'bad');
+      
+      document.getElementById('markets').innerHTML = markets.map(m => 
+        '<div class="market">' +
+          '<div class="market-question">' + m.question + '</div>' +
+          '<div style="margin-bottom:10px;">' +
+            'Current: <strong>' + (m.category === 'bitcoin' ? 'BTC' : 'ETH') + '</strong> $' + m.currentPrice.toLocaleString() + 
+            ' | Target: $' + m.targetPrice.toLocaleString() + 
+            ' | <span style="color:#888;">' + m.priceToTarget + ' of target</span>' +
+          '</div>' +
+          '<div style="margin-bottom:10px;">' +
+            '<span class="odds">YES: ' + (m.yesOdds * 100).toFixed(0) + '%</span> | ' +
+            '<span class="odds">NO: ' + (m.noOdds * 100).toFixed(0) + '%</span>' +
+          '</div>' +
+          '<div>' +
+            '<input type="number" id="amt-' + m.id + '" value="10" min="1"> ' +
+            '<button class="btn" onclick="placeBet(\\'' + m.id + '\\', \\'YES\\')">Bet YES</button>' +
+            '<button class="btn btn-no" onclick="placeBet(\\'' + m.id + '\\', \\'NO\\')">Bet NO</button>' +
+          '</div>' +
+        '</div>'
+      ).join('');
+      
+      if (bets.length > 0) {
+        document.getElementById('bets').innerHTML = bets.map(b => 
+          '<div class="bet ' + b.status + '">' +
+            '<strong>' + b.outcome + '</strong> $' + b.amount + 
+            ' @ ' + (b.odds * 100).toFixed(0) + '% on "' + b.question.substring(0, 40) + '..."' +
+            '<br><span style="color:#888;">Price at bet: $' + (b.priceAtBet?.toLocaleString() || '-') + 
+            ' | Now: $' + (b.currentPrice?.toLocaleString() || '-') + '</span>' +
+            ' | Status: <strong>' + b.status + '</strong>' +
+            (b.status === 'pending' ? 
+              ' <button class="btn" onclick="settleBet(' + b.id + ', true)">Won</button>' +
+              '<button class="btn btn-no" onclick="settleBet(' + b.id + ', false)">Lost</button>' : '') +
+          '</div>'
+        ).join('');
+      } else {
+        document.getElementById('bets').innerHTML = '<div style="color:#666;">No bets yet</div>';
+      }
+    }
+    
+    async function placeBet(marketId, outcome) {
+      const amount = parseFloat(document.getElementById('amt-' + marketId).value);
+      const res = await fetch('/api/bet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marketId, outcome, amount })
+      });
+      const data = await res.json();
+      if (data.error) alert(data.error);
+      else load();
+    }
+    
+    async function settleBet(id, won) {
+      await fetch('/api/bet/' + id + '/settle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ won })
+      });
+      load();
+    }
+    
+    async function autoSettle() {
+      await fetch('/api/auto-settle', { method: 'POST' });
+      load();
+    }
+    
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>`;
+  res.send(html);
+});
+
+app.listen(PORT, () => {
+  console.log(`[PaperTrading] Running at http://localhost:${PORT}`);
+});
